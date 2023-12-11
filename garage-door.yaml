@@ -1,0 +1,257 @@
+sphome:
+  name: garage-controller
+  platform: ESP8266
+  board: d1_mini
+  comment: "IP 192.168.1.30"
+
+  on_boot:
+    then:
+      - logger.log: "BOOTING"
+      - if:
+          condition:
+            - binary_sensor.is_on: bottom_endstop
+          then:
+            - logger.log: "Restoring FULLY_CLOSED state"
+            - state_machine.set: FULLY_CLOSED
+            - cover.template.publish:
+                id: garage_door
+                state: CLOSED
+                current_operation: IDLE
+          else:
+            - if:
+                condition:
+                  - binary_sensor.is_on: top_endstop
+                then:
+                  - logger.log: "Restoring FULLY_OPEN state"
+                  - state_machine.set: FULLY_OPEN
+                  - cover.template.publish:
+                      id: garage_door
+                      state: OPEN
+                      current_operation: IDLE 
+                else:
+                  - logger.log: "Booting to UNKNOWN state"
+                  - state_machine.set: UNKOWN
+     
+
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+ password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  manual_ip:
+    static_ip: 192.168.1.30
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Garage-Door-Controller"
+    password: !secret fallback_password
+
+captive_portal:
+
+web_server:
+  port: 80
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/muxa/esphome-state-machine
+
+
+
+switch:
+  - platform: gpio
+    pin: D6
+    id: garage_opener_relay
+    on_turn_on:
+      - delay: 200ms
+      - switch.turn_off: garage_opener_relay
+
+binary_sensor:
+  - platform: template
+    name: "Garage Door State"
+    device_class: garage_door
+    lambda: |-
+      if (id(bottom_endstop).state) {
+        // Garage Door is closed.
+        return false;
+      } else {
+        // Garage Door is open.
+        return true;
+      }
+  - platform: gpio # TOP SENSOR
+    pin: D2
+    id: top_endstop
+    name: "Door Fully Open"
+    filters:
+      - delayed_on_off: 50ms
+    on_release: 
+      - state_machine.transition: TOP_RELEASED
+    on_press:
+      - state_machine.transition: TOP_ENGAGED
+  - platform: gpio # BOOTOM SENSOR
+    pin: D3
+    id: bottom_endstop
+    name: "Door Fully Closed"
+    filters:
+      - delayed_on_off: 50ms
+    on_release: 
+      - state_machine.transition: BOTTOM_RELEASED
+    on_press:
+      - state_machine.transition: BOTTOM_ENGAGED
+
+  - platform: gpio # IR SENSOR
+    pin: D1
+    id: IR_sensor
+    name: "Obstruction Sensor"
+    on_release: 
+      - state_machine.transition: IR_SENSOR_OFF
+    on_press:
+      - state_machine.transition: IR_SENSOR_ON
+
+text_sensor:
+  - platform: state_machine
+    name: Garage Door Machine State
+
+state_machine:
+  - name: "Garage Door State Machine"
+    id: garage_sm
+    states:
+      - name: FULLY_CLOSED
+        on_set:
+          - cover.template.publish:
+              id: garage_door
+              state: CLOSED
+              current_operation: IDLE
+        on_enter:
+          - cover.template.publish:
+              id: garage_door
+              state: CLOSED
+              current_operation: IDLE
+      - name: OPENING
+        on_enter:
+          - cover.template.publish:
+              id: garage_door
+              state: OPEN
+              current_operation: OPENING
+      - name: FULLY_OPEN
+        on_set:
+          - cover.template.publish:
+              id: garage_door
+              state: OPEN
+              current_operation: IDLE
+        on_enter:
+          - cover.template.publish:
+              id: garage_door
+              state: OPEN
+              current_operation: IDLE        
+      - name: OBSTRUCTED_OPEN
+        on_enter:
+          - cover.template.publish:
+              id: garage_door
+              state: OPEN
+              current_operation: IDLE
+      - name: OBSTRUCTED_CLOSING
+        on_enter:
+          - cover.template.publish:
+              id: garage_door
+              state: OPEN
+              current_operation: OPENING
+          # reverse door operation by triggering relay twice
+          - switch.turn_on: garage_opener_relay      
+          - delay: 200ms
+          - switch.turn_on: garage_opener_relay
+
+      - name: CLOSING
+        on_enter:
+        - cover.template.publish:
+            id: garage_door
+            state: OPEN
+            current_operation: CLOSING
+            
+      - name: UNKNOWN
+
+    inputs:
+      - name: TOP_ENGAGED
+        transitions:
+          - UNKNOWN -> FULLY_OPEN
+          - OBSTRUCTED_CLOSING -> FULLY_OPEN
+          - OPENING -> FULLY_OPEN
+          - CLOSING -> FULLY_OPEN
+
+      - name: TOP_RELEASED
+        transitions:
+          - FULLY_OPEN -> CLOSING
+          - OBSTRUCTED_OPEN -> OBSTRUCTED_CLOSING
+
+      - name: BOTTOM_ENGAGED 
+        transitions:
+          - UNKNOWN -> FULLY_CLOSED
+          - OPENING -> FULLY_CLOSED
+          - CLOSING -> FULLY_CLOSED
+
+      - name: BOTTOM_RELEASED
+        transitions:
+          - FULLY_CLOSED -> OPENING
+
+      - name: OPEN # triggered by HA
+        transitions:
+          - FULLY_CLOSED -> OPENING
+          - CLOSING -> OPENING
+          - OBSTRUCTED_OPEN -> FULLY_OPEN
+        on_input:
+          - switch.turn_on: garage_opener_relay
+
+      - name: CLOSE # triggered by HA
+        transitions:
+          - FULLY_OPEN -> CLOSING
+          - OPENING -> CLOSING
+        on_input:
+          - switch.turn_on: garage_opener_relay
+          
+      - name: IR_SENSOR_ON # triggered by IR Sensor
+        transitions:
+          - OBSTRUCTED_OPEN -> FULLY_OPEN
+ 
+      - name: IR_SENSOR_OFF # triggered by IR Sensor
+        transitions:
+          - CLOSING -> OBSTRUCTED_CLOSING
+          - FULLY_OPEN -> OBSTRUCTED_OPEN
+
+
+cover:
+  - platform: template
+    name: "Garage Door"
+    id: garage_door
+    device_class: garage
+    lambda: |-
+      if (id(bottom_endstop).state) { return COVER_CLOSED; }
+      else { return COVER_OPEN; }; 
+    open_action: 
+      - state_machine.transition: OPEN
+    close_action:
+      - state_machine.transition: CLOSE
+
+sensor:
+  - platform: wifi_signal
+    name: "Garage Controller WiFi Signal"
+    update_interval: 60s
+
+  - platform: uptime
+    name: "Garage Controller Uptime"
+    filters:
+      - lambda: return x / 86400.0;
+    unit_of_measurement: "days"
