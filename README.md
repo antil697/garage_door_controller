@@ -8,6 +8,6 @@ My solution was to use a D1-mini board, added a relay, two endstop siwtches to d
 It also needs to operate idependant of HomneAssistant to operate the door and still allow the manual operatoin with button or remote control as backup. 
 
 I deployed a state machine in the code. The State Machine that builds the basis for the code is shown [here](https://stately.ai/registry/editor/c75df474-d5b7-42d2-aade-f372775f61c1?machineId=daa53767-9e83-4e3c-a6ed-1a4582f7df22&mode=Design)
-
+[State Machine](assets/StateMachine.png)
 It will allow the door to be controlled via HomeAssistant (and via Carplay with HomeKit integration). When an obstruction is detected while the door is closing, it will stop and reverse the door operation. 
 When and obstruction is detected while a CLOSE command is received, it will ignore the command. Should the command come from the manual button/remote controller, it will quickly correct and reverse the door to fully open. 
