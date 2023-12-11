@@ -12,3 +12,5 @@ I deployed a state machine in the code. The State Machine that builds the basis 
 ![State Machine](/assets/StateMachine.png)
 It will allow the door to be controlled via HomeAssistant (and via Carplay with HomeKit integration). When an obstruction is detected while the door is closing, it will stop and reverse the door operation. 
 When and obstruction is detected while a CLOSE command is received, it will ignore the command. Should the command come from the manual button/remote controller, it will quickly correct and reverse the door to fully open. 
+
+This has been working solid now for over a year. Frigate integration in HomeAssistant will detect a car leaving and close the door when it leaves the driveway. On return, it will open the door. The automation will watch for a car to pull up to the garage door after entering the home zone. It is one my most favoured automations that just work. 
